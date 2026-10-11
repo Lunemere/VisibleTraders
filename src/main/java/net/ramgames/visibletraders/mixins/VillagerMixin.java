@@ -69,48 +69,52 @@ public abstract class VillagerMixin extends AbstractVillager implements Reputati
 
     @Inject(method = "tick", at = @At("HEAD"))
     private void updateLockedTradesOnTick(CallbackInfo ci) {
+        this.visibleTraders$ensureLockedOffers();
+    }
+
+    @Unique
+    private void visibleTraders$ensureLockedOffers() {
         if(this.isClientSide()) return;
 
         int level = this.getVillagerData().getLevel();
         prevLevel = level;
 
         if(this.offers == null) {
-            // Trade Cycling temporarily clears the villager's normal offers
-            // before immediately sending the refreshed merchant menu. Keep
-            // the cached locked offers available so that packet still
-            // contains the complete trade list.
+            // Wait until the merchant has generated its new available offers.
             return;
         }
 
-        if(cachedTrade == null || this.offers.isEmpty()) {
+        if(this.offers.isEmpty()) {
             this.lockedOffers = null;
-            if(!this.offers.isEmpty()) this.cachedTrade = this.offers.get(0);
+            this.cachedTrade = null;
             return;
         }
 
         if(cachedTrade != this.offers.get(0)) {
             this.lockedOffers = null;
             this.cachedTrade = this.offers.get(0);
-            return;
         }
 
         if(this.lockedOffers == null) this.lockedOffers = new ArrayList<>();
-        int size = this.lockedOffers.size();
-
-        if(size + level == 5) return;
-        if(size > 0 && size + level > 5) {
+        while(!this.lockedOffers.isEmpty() && this.lockedOffers.size() + level > 5) {
             this.lockedOffers.remove(0);
-            return;
         }
         VillagerData data = this.getVillagerData();
-        this.setVillagerData(data.setLevel(data.getLevel()+size + 1));
-        int prev = this.offers.size();
-        this.updateTrades();
-        int dif = this.offers.size() - prev;
-        MerchantOffers newOffers = new MerchantOffers();
-        for(int i = 0; i < dif; i++) newOffers.add(this.offers.remove(this.offers.size() - 1));
-        this.lockedOffers.add(newOffers);
-        this.setVillagerData(data);
+        // Packet construction must see every level from the same refresh.
+        // Building one level per tick left the client showing stale previews.
+        try {
+            while(this.lockedOffers.size() + level < 5) {
+                this.setVillagerData(data.setLevel(level + this.lockedOffers.size() + 1));
+                int prev = this.offers.size();
+                this.updateTrades();
+                int dif = this.offers.size() - prev;
+                MerchantOffers newOffers = new MerchantOffers();
+                for(int i = 0; i < dif; i++) newOffers.add(this.offers.remove(this.offers.size() - 1));
+                this.lockedOffers.add(newOffers);
+            }
+        } finally {
+            this.setVillagerData(data);
+        }
     }
 
     @Inject(method = "readAdditionalSaveData", at = @At("TAIL"))
@@ -150,6 +154,7 @@ public abstract class VillagerMixin extends AbstractVillager implements Reputati
 
     @Override
     public MerchantOffers visibleTraders$getLockedOffers() {
+        this.visibleTraders$ensureLockedOffers();
         if(this.lockedOffers == null) return new MerchantOffers();
         MerchantOffers lockedOffers = new MerchantOffers();
         for(MerchantOffers listOffers : List.copyOf(this.lockedOffers)) for(MerchantOffer offer : listOffers) {
