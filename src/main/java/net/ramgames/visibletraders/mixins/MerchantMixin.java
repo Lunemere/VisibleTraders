@@ -20,7 +20,8 @@ public interface MerchantMixin {
     @ModifyArg(method = "openTradingScreen", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/player/Player;sendMerchantOffers(ILnet/minecraft/world/item/trading/MerchantOffers;IIZZ)V"), index = 1)
     private MerchantOffers appendLockedTradesToOffers(MerchantOffers merchantOffers) {
         if(!((Merchant) this instanceof Villager villager)) return merchantOffers;
-        MerchantOffers offersCopy = merchantOffers.copy();
+        MerchantOffers offersCopy = new MerchantOffers();
+        offersCopy.addAll(merchantOffers);
         offersCopy.addAll(((VillagerDuck) villager).visibleTraders$getLockedOffers());
         return offersCopy;
     }

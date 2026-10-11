@@ -1,8 +1,10 @@
 package net.ramgames.visibletraders.mixins;
 
 import net.minecraft.world.inventory.MerchantMenu;
+import net.minecraft.world.item.trading.Merchant;
 import net.ramgames.visibletraders.MerchantMenuDuck;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
@@ -11,6 +13,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 @Mixin(MerchantMenu.class)
 public abstract class MerchantMenuMixin implements MerchantMenuDuck {
+
+    @Shadow @Final private Merchant trader;
 
     @Shadow private int merchantLevel;
     @Unique
@@ -28,5 +32,10 @@ public abstract class MerchantMenuMixin implements MerchantMenuDuck {
     public boolean visibleTraders$shouldAllowTrade(int i) {
         if(unlockedTradeCount == 0) return true;
         return i <= unlockedTradeCount-1;
+    }
+
+    @Override
+    public Merchant visibleTraders$getTrader() {
+        return trader;
     }
 }

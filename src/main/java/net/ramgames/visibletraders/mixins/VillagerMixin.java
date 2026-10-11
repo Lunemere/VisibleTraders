@@ -1,9 +1,7 @@
 package net.ramgames.visibletraders.mixins;
 
-import com.mojang.serialization.Codec;
-import com.mojang.serialization.DataResult;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.NbtOps;
+import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
@@ -62,10 +60,11 @@ public abstract class VillagerMixin extends AbstractVillager implements Reputati
     @Inject(method = "addAdditionalSaveData", at = @At("HEAD"))
     private void writeOfferingLevel(CompoundTag compoundTag, CallbackInfo ci) {
         if(this.lockedOffers == null) return;
-        DataResult<Tag> val = Codec.list(MerchantOffers.CODEC).encodeStart(this.registryAccess().createSerializationContext(NbtOps.INSTANCE), this.lockedOffers);
-        if(val.isError()) //noinspection OptionalGetWithoutIsPresent
-            visibleTradersLogger.error(val.error().get().toString());
-        else compoundTag.put("LockedOffers", val.getOrThrow());
+        ListTag serializedOffers = new ListTag();
+        for (MerchantOffers offers : this.lockedOffers) {
+            serializedOffers.add(offers.createTag());
+        }
+        compoundTag.put("LockedOffers", serializedOffers);
     }
 
     @Inject(method = "tick", at = @At("HEAD"))
@@ -76,19 +75,22 @@ public abstract class VillagerMixin extends AbstractVillager implements Reputati
         prevLevel = level;
 
         if(this.offers == null) {
-            this.lockedOffers = null;
+            // Trade Cycling temporarily clears the villager's normal offers
+            // before immediately sending the refreshed merchant menu. Keep
+            // the cached locked offers available so that packet still
+            // contains the complete trade list.
             return;
         }
 
         if(cachedTrade == null || this.offers.isEmpty()) {
             this.lockedOffers = null;
-            if(!this.offers.isEmpty()) this.cachedTrade = this.offers.getFirst();
+            if(!this.offers.isEmpty()) this.cachedTrade = this.offers.get(0);
             return;
         }
 
-        if(cachedTrade != this.offers.getFirst()) {
+        if(cachedTrade != this.offers.get(0)) {
             this.lockedOffers = null;
-            this.cachedTrade = this.offers.getFirst();
+            this.cachedTrade = this.offers.get(0);
             return;
         }
 
@@ -97,7 +99,7 @@ public abstract class VillagerMixin extends AbstractVillager implements Reputati
 
         if(size + level == 5) return;
         if(size > 0 && size + level > 5) {
-            this.lockedOffers.removeFirst();
+            this.lockedOffers.remove(0);
             return;
         }
         VillagerData data = this.getVillagerData();
@@ -106,19 +108,21 @@ public abstract class VillagerMixin extends AbstractVillager implements Reputati
         this.updateTrades();
         int dif = this.offers.size() - prev;
         MerchantOffers newOffers = new MerchantOffers();
-        for(int i = 0; i < dif; i++) newOffers.add(this.offers.removeLast());
+        for(int i = 0; i < dif; i++) newOffers.add(this.offers.remove(this.offers.size() - 1));
         this.lockedOffers.add(newOffers);
         this.setVillagerData(data);
     }
 
     @Inject(method = "readAdditionalSaveData", at = @At("TAIL"))
     private void readOfferingLevel(CompoundTag compoundTag, CallbackInfo ci) {
-        if(compoundTag.contains("LockedOffers")) Codec.list(MerchantOffers.CODEC).parse(this.registryAccess().createSerializationContext(NbtOps.INSTANCE), compoundTag.get("LockedOffers")).resultOrPartial(msg -> {
-            this.lockedOffers = new ArrayList<>();
-            visibleTradersLogger.error(msg);
-        }).ifPresent((lockedOffers) -> this.lockedOffers = new ArrayList<>(lockedOffers));
-        else this.lockedOffers = new ArrayList<>();
-        if(this.offers != null && !this.offers.isEmpty()) cachedTrade = this.offers.getFirst();
+        this.lockedOffers = new ArrayList<>();
+        if(compoundTag.contains("LockedOffers", Tag.TAG_LIST)) {
+            ListTag serializedOffers = compoundTag.getList("LockedOffers", Tag.TAG_COMPOUND);
+            for (int i = 0; i < serializedOffers.size(); i++) {
+                this.lockedOffers.add(new MerchantOffers(serializedOffers.getCompound(i)));
+            }
+        }
+        if(this.offers != null && !this.offers.isEmpty()) cachedTrade = this.offers.get(0);
     }
 
     @Inject(method = "updateTrades", at = @At("HEAD"), cancellable = true)
@@ -127,7 +131,7 @@ public abstract class VillagerMixin extends AbstractVillager implements Reputati
         if(this.lockedOffers == null) return;
         if(prevLevel != this.getVillagerData().getLevel()) return;
         if(!this.lockedOffers.isEmpty() && this.lockedOffers.size() + this.getVillagerData().getLevel() > 5) {
-            MerchantOffers newOffers = lockedOffers.removeFirst();
+            MerchantOffers newOffers = lockedOffers.remove(0);
             this.offers.addAll(newOffers);
             ci.cancel();
         }
